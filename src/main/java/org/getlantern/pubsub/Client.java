@@ -12,6 +12,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.msgpack.core.MessageFormat;
 import org.msgpack.core.MessagePack;
@@ -34,6 +35,7 @@ public class Client implements Runnable {
             new LinkedBlockingQueue<Runnable>(1);
     private final LinkedBlockingQueue<Message> in =
             new LinkedBlockingQueue<Message>(1);
+    private final AtomicBoolean forceReconnect = new AtomicBoolean();
     private volatile Socket socket;
     private volatile MessagePacker packer;
     private final ScheduledExecutorService scheduledExecutor = Executors
@@ -125,7 +127,9 @@ public class Client implements Runnable {
                 Thread.sleep(backoff);
             }
 
-            if (socket == null) {
+            if (socket == null || forceReconnect.compareAndSet(true, false)) {
+                close();
+                
                 // Dial
                 try {
                     System.err.println("Dialing");
@@ -189,7 +193,7 @@ public class Client implements Runnable {
             doReadLoop(in);
         } catch (Exception e) {
             System.err.println("Error reading, closing connection");
-            close();
+            forceReconnect.set(true);
             forceConnect();
         }
     }
