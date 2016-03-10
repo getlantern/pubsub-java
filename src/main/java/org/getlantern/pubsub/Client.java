@@ -1,6 +1,5 @@
 package org.getlantern.pubsub;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,12 +34,13 @@ public class Client implements Runnable {
             new LinkedBlockingQueue<Runnable>(1);
     private final LinkedBlockingQueue<Message> in =
             new LinkedBlockingQueue<Message>(1);
-    private final AtomicBoolean forceReconnect = new AtomicBoolean();
-    private volatile Socket socket;
-    private volatile MessagePacker packer;
     private final ScheduledExecutorService scheduledExecutor = Executors
             .newSingleThreadScheduledExecutor();
+
+    private volatile Socket socket;
+    private volatile MessagePacker packer;
     private volatile ScheduledFuture<?> nextKeepalive;
+    private final AtomicBoolean forceReconnect = new AtomicBoolean();
 
     public static class ClientConfig {
         public Callable<Socket> dial;
@@ -127,33 +127,32 @@ public class Client implements Runnable {
                 Thread.sleep(backoff);
             }
 
-            if (socket == null || forceReconnect.compareAndSet(true, false)) {
+            boolean force = forceReconnect.compareAndSet(true, false);
+            boolean socketNull = socket == null;
+            if (force || socketNull) {
                 close();
-                
+
                 // Dial
                 try {
-                    System.err.println("Dialing");
+                    // Dial
                     socket = cfg.dial.call();
                     packer = MessagePack
                             .newDefaultPacker(new BufferedOutputStream(socket
                                     .getOutputStream()));
-                    System.err.println("Sending initial messages");
+
                     sendInitialMessages();
 
-                    System.err.println("Starting read loop");
                     final InputStream in = socket.getInputStream();
                     // Start read loop
                     Thread thread = new Thread(new Runnable() {
                         @Override
                         public void run() {
-                            readLoop(MessagePack.newDefaultUnpacker(new BufferedInputStream(
-                                    in)));
+                            readLoop(MessagePack.newDefaultUnpacker(in));
                         }
                     }, "Client-ReadLoop");
                     thread.setDaemon(true);
                     thread.start();
 
-                    System.err.println("Success");
                     // Success
                     return;
                 } catch (Exception e) {
@@ -192,7 +191,7 @@ public class Client implements Runnable {
         try {
             doReadLoop(in);
         } catch (Exception e) {
-            System.err.println("Error reading, closing connection");
+            e.printStackTrace();
             forceReconnect.set(true);
             forceConnect();
         }
@@ -201,11 +200,18 @@ public class Client implements Runnable {
     private void doReadLoop(MessageUnpacker in) throws IOException,
             InterruptedException {
         while (true) {
-            Message message = new Message();
-            message.setType(in.unpackByte());
-            message.setTopic(unpackByteArray(in));
-            message.setBody(unpackByteArray(in));
-            this.in.put(message);
+            if (in.getNextFormat() == MessageFormat.NIL) {
+                in.skipValue();
+                continue;
+            }
+            Message msg = new Message();
+            msg.setType(in.unpackByte());
+            msg.setTopic(unpackByteArray(in));
+            msg.setBody(unpackByteArray(in));
+            // Ignore KeepAlive messages
+            if (msg.getType() != Type.KeepAlive) {
+                this.in.put(msg);
+            }
         }
     }
 
@@ -223,25 +229,26 @@ public class Client implements Runnable {
         if (nextKeepalive != null) {
             nextKeepalive.cancel(false);
         }
-        scheduledExecutor.schedule(sendKeepalive, cfg.keepalivePeriod,
+        nextKeepalive = scheduledExecutor.schedule(sendKeepalive,
+                cfg.keepalivePeriod,
                 TimeUnit.MILLISECONDS);
     }
 
     private void close() {
         if (socket != null) {
-            System.err.println("Closing socket");
             try {
-                socket.close();
+                packer.close();
             } catch (Exception e) {
                 // ignore exception on close
             }
             socket = null;
+            packer = null;
         }
     }
 
     public static class Sendable implements Runnable {
-        private Client client;
-        private Message msg;
+        private final Client client;
+        private final Message msg;
 
         public Sendable(Client client, Message msg) {
             super();
@@ -283,6 +290,7 @@ public class Client implements Runnable {
     private static byte[] unpackByteArray(MessageUnpacker in)
             throws IOException {
         if (MessageFormat.NIL == in.getNextFormat()) {
+            in.skipValue();
             return null;
         }
         int length = in.unpackBinaryHeader();
