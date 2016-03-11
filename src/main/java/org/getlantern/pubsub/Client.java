@@ -5,13 +5,18 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.Socket;
 import java.nio.charset.Charset;
-import java.util.concurrent.Callable;
+import java.security.KeyStore;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
 
 import org.msgpack.core.MessageFormat;
 import org.msgpack.core.MessagePack;
@@ -43,12 +48,22 @@ public class Client implements Runnable {
     private final AtomicBoolean forceReconnect = new AtomicBoolean();
 
     public static class ClientConfig {
-        public Callable<Socket> dial;
+        private final String host;
+        private final int port;
         public long backoffBase;
         public long maxBackoff;
         public long keepalivePeriod;
         public String authenticationKey;
         public byte[][] initialTopics;
+
+        public ClientConfig(String host, int port) {
+            this.host = host;
+            this.port = port;
+        }
+
+        private Socket dial() throws IOException {
+            return sslContext.getSocketFactory().createSocket(host, port);
+        }
     }
 
     public Client(ClientConfig cfg) {
@@ -135,7 +150,7 @@ public class Client implements Runnable {
                 // Dial
                 try {
                     // Dial
-                    socket = cfg.dial.call();
+                    socket = cfg.dial();
                     packer = MessagePack
                             .newDefaultPacker(new BufferedOutputStream(socket
                                     .getOutputStream()));
@@ -204,14 +219,16 @@ public class Client implements Runnable {
                 in.skipValue();
                 continue;
             }
+            byte type = in.unpackByte();
+            if (type == Type.KeepAlive) {
+                // KeepAlive messages only contain the type, and we ignore them
+                continue;
+            }
             Message msg = new Message();
-            msg.setType(in.unpackByte());
+            msg.setType(type);
             msg.setTopic(unpackByteArray(in));
             msg.setBody(unpackByteArray(in));
-            // Ignore KeepAlive messages
-            if (msg.getType() != Type.KeepAlive) {
-                this.in.put(msg);
-            }
+            this.in.put(msg);
         }
     }
 
@@ -272,8 +289,11 @@ public class Client implements Runnable {
         private void sendImmediate() throws IOException {
             client.resetKeepalive();
             client.packer.packByte(msg.getType());
-            packByteArray(msg.getTopic());
-            packByteArray(msg.getBody());
+            if (msg.getType() != Type.KeepAlive) {
+                // Only non-KeepAlive messages contain a topic and body
+                packByteArray(msg.getTopic());
+                packByteArray(msg.getBody());
+            }
             client.packer.flush();
         }
 
@@ -297,5 +317,46 @@ public class Client implements Runnable {
         byte[] result = new byte[length];
         in.readPayload(result);
         return result;
+    }
+
+    // pubsub.lantern.io uses a certificate from letsencrypt. The root
+    // certificates for letsencrypt are not part of Java's standard trust store,
+    // so we're loading it explicitly.
+    //
+    // See
+    // http://danielstechblog.blogspot.com/2016/02/letsencrypt-java-truststore.html
+    // See
+    // http://stackoverflow.com/questions/24043397/options-for-programatically-adding-certificates-to-java-keystore
+    private static final SSLContext sslContext;
+
+    static {
+        try {
+            KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
+            ks.load(null, null);
+            addCertificate(ks, "isrgrootx1", "isrgrootx1.pem");
+            addCertificate(ks, "letsencryptauthorityx1", "letsencryptauthorityx1.der");
+            addCertificate(ks, "letsencryptauthorityx2", "letsencryptauthorityx2.der");
+            addCertificate(ks, "lets-encrypt-x2-cross-signed", "lets-encrypt-x2-cross-signed.der");
+
+            TrustManagerFactory tmf = TrustManagerFactory
+                    .getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init(ks);
+
+            sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, tmf.getTrustManagers(), null);
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw new RuntimeException("Unable to initialize sslContext: "
+                    + e.getMessage(), e);
+        }
+    }
+
+    private static void addCertificate(KeyStore ks, String alias, String file)
+            throws Exception {
+        InputStream in = Client.class.getResourceAsStream(file);
+        X509Certificate cert = (X509Certificate) CertificateFactory
+                .getInstance("X.509")
+                .generateCertificate(in);
+        ks.setCertificateEntry(alias, cert);
     }
 }
