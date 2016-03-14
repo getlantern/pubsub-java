@@ -1,4 +1,7 @@
-package org.getlantern.pubsub;
+package org.lantern.pubsub;
+
+import org.lantern.pubsub.Client;
+import org.lantern.pubsub.Message;
 
 public class LongRunningClient extends BaseClient {
     public static void main(String[] args) throws Exception {

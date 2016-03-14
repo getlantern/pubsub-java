@@ -1,6 +1,8 @@
-package org.getlantern.pubsub;
+package org.lantern.pubsub;
 
 import java.util.Random;
+
+import org.lantern.pubsub.Client;
 
 /**
  * This client generates load for performance testing. Useful in conjunction

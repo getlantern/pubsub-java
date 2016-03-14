@@ -1,6 +1,7 @@
-package org.getlantern.pubsub;
+package org.lantern.pubsub;
 
-import org.getlantern.pubsub.Client.ClientConfig;
+import org.lantern.pubsub.Client;
+import org.lantern.pubsub.Client.ClientConfig;
 
 public class BaseClient {
     public static final String SERVER = "pubsub.lantern.io";

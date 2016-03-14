@@ -1,4 +1,4 @@
-package org.getlantern.pubsub;
+package org.lantern.pubsub;
 
 /**
  * A Message

@@ -1,4 +1,4 @@
-package org.getlantern.pubsub;
+package org.lantern.pubsub;
 
 /**
  * Enumerates types of {@link Message}.
