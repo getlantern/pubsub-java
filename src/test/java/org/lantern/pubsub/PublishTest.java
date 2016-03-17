@@ -1,15 +1,15 @@
 package org.lantern.pubsub;
 
+import static org.junit.Assert.*;
+
 import java.util.concurrent.TimeUnit;
 
 import org.junit.Test;
 
-import static org.junit.Assert.*;
-
 public class PublishTest extends BaseClient {
-    private static final byte[] TEST_TOPIC = Client.utf8("Test Topic"); 
+    private static final byte[] TEST_TOPIC = Client.utf8("Test Topic");
     private static final byte[] TEST_BODY = Client.utf8("Test Body");
-    
+
     @Test
     public void testRoundTrip() throws Exception {
         Client client = newClient();
