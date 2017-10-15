@@ -67,6 +67,9 @@ public class Client implements Runnable {
         }
 
         private Socket dial() throws IOException {
+            if (sslContext == null) {
+              throw new IOException("sslContext not initialized");
+            }
             return sslContext.getSocketFactory().createSocket(host, port);
         }
     }
@@ -330,31 +333,34 @@ public class Client implements Runnable {
     // http://danielstechblog.blogspot.com/2016/02/letsencrypt-java-truststore.html
     // See
     // http://stackoverflow.com/questions/24043397/options-for-programatically-adding-certificates-to-java-keystore
-    private static final SSLContext sslContext;
+    private static final SSLContext sslContext = initializeSSLContext();
 
-    static {
-        try {
-            KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
-            ks.load(null, null);
-            addCertificate(ks, "isrgrootx1", "isrgrootx1.pem");
-            addCertificate(ks, "letsencryptauthorityx1",
-                    "letsencryptauthorityx1.der");
-            addCertificate(ks, "letsencryptauthorityx2",
-                    "letsencryptauthorityx2.der");
-            addCertificate(ks, "lets-encrypt-x2-cross-signed",
-                    "lets-encrypt-x2-cross-signed.der");
+    private static SSLContext initializeSSLContext() {
+      try {
+          KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
+          ks.load(null, null);
+          addCertificate(ks, "isrgrootx1", "isrgrootx1.pem");
+          addCertificate(ks, "letsencryptauthorityx3",
+                  "letsencryptauthorityx3.pem");
+          addCertificate(ks, "letsencryptauthorityx4",
+                  "letsencryptauthorityx4.pem");
+          addCertificate(ks, "lets-encrypt-x3-cross-signed",
+                  "lets-encrypt-x3-cross-signed.pem");
+          addCertificate(ks, "lets-encrypt-x4-cross-signed",
+                  "lets-encrypt-x4-cross-signed.pem");
 
-            TrustManagerFactory tmf = TrustManagerFactory
-                    .getInstance(TrustManagerFactory.getDefaultAlgorithm());
-            tmf.init(ks);
+          TrustManagerFactory tmf = TrustManagerFactory
+                  .getInstance(TrustManagerFactory.getDefaultAlgorithm());
+          tmf.init(ks);
 
-            sslContext = SSLContext.getInstance("TLS");
-            sslContext.init(null, tmf.getTrustManagers(), null);
-        } catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException("Unable to initialize sslContext: "
-                    + e.getMessage(), e);
-        }
+          SSLContext sslContext = SSLContext.getInstance("TLS");
+          sslContext.init(null, tmf.getTrustManagers(), null);
+          return sslContext;
+      } catch (Exception e) {
+          new RuntimeException("Unable to initialize sslContext: "
+                  + e.getMessage(), e).printStackTrace();
+          return null;
+      }
     }
 
     private static void addCertificate(KeyStore ks, String alias, String file)
