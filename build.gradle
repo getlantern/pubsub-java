@@ -19,12 +19,21 @@ sourceCompatibility = '1.6'
 
 dependencies {
   compile "org.msgpack:msgpack-core:0.8.3"
-  
+
   testCompile 'junit:junit:4.12'
 }
 
 shadowJar {
   classifier = 'fat'
+}
+
+test {
+    testLogging {
+        // Make sure output from
+        // standard out or error is shown
+        // in Gradle output.
+        showStandardStreams = true
+    }
 }
 
 task wrapper(type: Wrapper) {
